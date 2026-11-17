@@ -1,6 +1,5 @@
 {
-  ## TODO: Change to your project's description:
-  description = "Nix template for Effekt projects";
+  description = "The game of Mastermind, but unfair, written in Effekt";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -22,7 +21,7 @@
 
       ## Project configuration
       # TODO: Change to your project's details:
-      pname = "effekt-template";         # package name
+      pname = "Mefisto-Effekt";          # package name
       version = "0.1.0";                 # package version
       mainFile = "src/main.effekt";      # relative path to entrypoint (as a string)
       testFiles = [ "src/test.effekt" ]; # relative paths to tests (as a string)
