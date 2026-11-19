@@ -10,15 +10,6 @@ import exception
 import tty
 
 
-def bright_red(text: String) = Formatted::colored(text, Color::BRIGHT_RED)
-def bright_green(text: String) = Formatted::colored(text, Color::BRIGHT_GREEN)
-def bright_yellow(text: String) = Formatted::colored(text, Color::BRIGHT_YELLOW)
-def bright_blue(text: String) = Formatted::colored(text, Color::BRIGHT_BLUE)
-def bright_magenta(text: String) = Formatted::colored(text, Color::BRIGHT_MAGENTA)
-def bright_cyan(text: String) = Formatted::colored(text, Color::BRIGHT_CYAN)
-def bright_white(text: String) = Formatted::colored(text, Color::BRIGHT_WHITE)
-
-
 // Handle the fail effect by running the onFailure code, then trying the code again.
 // This is repeated until the fail doesn't occur any longer.
 def retryUntilSuccess[A] {onFailure: => Unit} {code: => A / fail}: A = {
@@ -64,4 +55,4 @@ def failureToException[A](msg: String) { code: => A / fail }: A / Exception[Fail
 }
 
 // Adaptation of the toInt function that uses an Exception with a message instead of a failure
-def toIntWithException(s: String) = failureToException("Could not convert string to int") { s.toInt }
+def toIntWithException(s: String) = failureToException("Could not convert string to int: \"" ++ s ++ "\"") { s.toInt }

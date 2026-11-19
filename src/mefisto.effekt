@@ -4,20 +4,27 @@ import tty
 import src/nonstdlib
 
 
-def getPinRepresentation(pin: Int): String / Formatted = bold(pin match {
-    case 0 => red("0")
-    case 1 => green("1")
-    case 2 => blue("2")
-    case 3 => yellow("3")
-    case 4 => magenta("4")
-    case 5 => cyan("5")
-    case 6 => bright_red("6")
-    case 7 => bright_green("7")
-    case 8 => bright_yellow("8")
-    case 9 => bright_cyan("9")
-    case _ => pin.show
-})
+def getPinRepresentation(pin: Int): String / Formatted = {
+    val escapes = pin match {
+        case 0 => ["\u001b[48;5;196m"] // Red background
+        case 1 => ["\u001b[48;5;202m"] // Orange background
+        case 2 => ["\u001b[48;5;226m", "\u001b[38;5;0m"] // Yellow background, Black foreground
+        case 3 => ["\u001b[48;5;46m"]  // Green background
+        case 4 => ["\u001b[48;5;51m"]  // Cyan background
+        case 5 => ["\u001b[48;5;33m"]  // Blue background
+        case 6 => ["\u001b[48;5;93m"]  // Purple background
+        case 7 => ["\u001b[48;5;201m"] // Magenta background
+        case 8 => ["\u001b[48;5;250m", "\u001b[38;5;0m"] // Light gray background, Black foreground
+        case 9 => ["\u001b[48;5;240m"] // Dark gray background
+        case _ => Nil()
+    }
 
+    if (escapes.nonEmpty && escapes.all{ x => do supportsEscape(x) }) {
+        escapes.join("") ++ pin.show ++ "\u001b[0m"
+    } else {
+        pin.show
+    }
+}
 
 // Represents a combination of pins, i.e. the secret code or a guess of it.
 record Code(
@@ -42,27 +49,29 @@ def show(gr: GuessResult) = gr match {
 
 interface GameMaster {
     def guessResult(guess: Code): GuessResult
+    def showSecretCode(): String / Formatted
 }
 
 interface Player {
     def makeGuess(): Code
-    def showBoard(code: Code, attempts: List[Code]): Unit
+    def showBoard(code: String, attempts: List[(Code, GuessResult)]): Unit / Formatted
 }
 
-def gameLoop(): Unit / { Formatted, Player } = {
-    var guesses: List[Code] = Nil()
-    val secretCode = Code([0, 1, 2, 3, 4])
+def gameLoop(): Unit / { Formatted, Player, GameMaster } = {
+    var guesses: List[(Code, GuessResult)] = Nil()
+    val secretCode = do showSecretCode()
 
     while (true) {
         do showBoard(secretCode, guesses.reverse)
         val guess = do makeGuess()
-        guesses = Cons(guess, guesses)
+        val result = do guessResult(guess)
+        guesses = Cons((guess, result), guesses)
     }
 }
 
-def consolePlayer[A] { code: => A / Player }: A = {
+def consolePlayer[A] { program: => A / Player }: A = {
     try {
-        code()
+        program()
     } with Player {
         def makeGuess() = {
             val guess = { 
@@ -77,18 +86,39 @@ def consolePlayer[A] { code: => A / Player }: A = {
             resume(Code(guess))
         }
 
-        def showBoard(code: Code, attempts: List[Code]) = {
-            println("+-----------------------------------+")
-            println("|                                   |")
-            println("|   Secret Code:  " ++ code.show ++ "   |")
-            println("|                                   |")
-            attempts.list::foreachIndex { (i, attempt) =>
-                println("|     Attempt " ++ (i + 1).show ++ ":  " ++ attempt.show ++ "   |")
+        def showBoard(code: String, attempts: List[(Code, GuessResult)]) = {
+            resume {
+                println("+-----------------------------------+")
+                println("|                                   |")
+                println("|   Secret Code:  " ++ code.show() ++ "   |")
+                println("|                                   |")
+                attempts.list::foreachIndex { (i, attempt) => attempt match {
+                    case (guess, result) => println("|     Attempt " ++ (i + 1).show ++ ":  " ++ guess.show ++ " - " ++ result.show ++ "  |")
+                }}
+                println("|                                   |")
+                println("+-----------------------------------+")
             }
-            println("|                                   |")
-            println("+-----------------------------------+")
-            resume(())
         }
+    }
+}
+
+def codeGuessResult(code: Code, guess: Code): GuessResult = {
+    var correctPos = 0
+    var incorrectPos = 0 // TODO
+
+    code.pins.zip(guess.pins).foreach { case (c, g) =>
+        if (c == g) correctPos += 1
+    }
+
+    GuessResult(correctPos, incorrectPos)
+}
+
+def deterministicGameMaster[A](code: Code) { program: => A / GameMaster }: A = {
+    try {
+        program()
+    } with GameMaster {
+        def guessResult(guess: Code) = resume(codeGuessResult(code, guess))
+        def showSecretCode() = resume { code.show() }
     }
 }
 
@@ -96,6 +126,7 @@ def consolePlayer[A] { code: => A / Player }: A = {
 def play() = {
     with Formatted::formatting
     with consolePlayer
+    with deterministicGameMaster(Code([1, 2, 3, 4, 5]))
     gameLoop()
 }
 
