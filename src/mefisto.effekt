@@ -1,0 +1,102 @@
+module src/mefisto
+
+import tty
+import src/nonstdlib
+
+
+def getPinRepresentation(pin: Int): String / Formatted = bold(pin match {
+    case 0 => red("0")
+    case 1 => green("1")
+    case 2 => blue("2")
+    case 3 => yellow("3")
+    case 4 => magenta("4")
+    case 5 => cyan("5")
+    case 6 => bright_red("6")
+    case 7 => bright_green("7")
+    case 8 => bright_yellow("8")
+    case 9 => bright_cyan("9")
+    case _ => pin.show
+})
+
+
+// Represents a combination of pins, i.e. the secret code or a guess of it.
+record Code(
+    pins: List[Int]
+)
+
+def show(c: Code) = c match {
+    case Code(pins) => "[" ++ pins.map{x => x.getPinRepresentation}.join(", ") ++ "]"
+}
+
+// Represents the result of a guess:
+// -> Number of pins that are in the correct position
+// -> Number of pins that have the right color but are placed incorrectly
+record GuessResult(
+    correctPos: Int,
+    incorrectPos: Int
+)
+
+def show(gr: GuessResult) = gr match {
+    case GuessResult(correctPos, incorrectPos) => "Correct: " ++ correctPos.show ++ ", Wrong position: " ++ incorrectPos.show
+}
+
+interface GameMaster {
+    def guessResult(guess: Code): GuessResult
+}
+
+interface Player {
+    def makeGuess(): Code
+    def showBoard(code: Code, attempts: List[Code]): Unit
+}
+
+def gameLoop(): Unit / { Formatted, Player } = {
+    var guesses: List[Code] = Nil()
+    val secretCode = Code([0, 1, 2, 3, 4])
+
+    while (true) {
+        do showBoard(secretCode, guesses.reverse)
+        val guess = do makeGuess()
+        guesses = Cons(guess, guesses)
+    }
+}
+
+def consolePlayer[A] { code: => A / Player }: A = {
+    try {
+        code()
+    } with Player {
+        def makeGuess() = {
+            val guess = { 
+                with on[Failure].retry() { msg => { println("Invalid input: " ++ msg) } }
+                print("Please enter your guess: ")
+                val input = readln().split("").map{x => x.toIntWithException()}
+                val inputSize = input.size()
+                if (inputSize != 5)
+                    do raise(Failure(), "You entered " ++ inputSize.show ++ " pins, but you need to guess " ++ 5.show ++ "!")
+                input
+            }
+            resume(Code(guess))
+        }
+
+        def showBoard(code: Code, attempts: List[Code]) = {
+            println("+-----------------------------------+")
+            println("|                                   |")
+            println("|   Secret Code:  " ++ code.show ++ "   |")
+            println("|                                   |")
+            attempts.list::foreachIndex { (i, attempt) =>
+                println("|     Attempt " ++ (i + 1).show ++ ":  " ++ attempt.show ++ "   |")
+            }
+            println("|                                   |")
+            println("+-----------------------------------+")
+            resume(())
+        }
+    }
+}
+
+
+def play() = {
+    with Formatted::formatting
+    with consolePlayer
+    gameLoop()
+}
+
+def main() = play()

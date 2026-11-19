@@ -1,0 +1,67 @@
+module src/nonstdlib
+
+// This file contains some very generic functionality, part of which I could imagine as stdlib functions
+// in the future. For the time being, this is mostly about converting between `Exception` and `fail`
+// (I don't really see any advantage in having the `fail` effect at all tbh, Exceptions seem just more powerful with
+// the `on` handlers and the attached messages, so why maintain both?)
+
+import partial
+import exception
+import tty
+
+
+def bright_red(text: String) = Formatted::colored(text, Color::BRIGHT_RED)
+def bright_green(text: String) = Formatted::colored(text, Color::BRIGHT_GREEN)
+def bright_yellow(text: String) = Formatted::colored(text, Color::BRIGHT_YELLOW)
+def bright_blue(text: String) = Formatted::colored(text, Color::BRIGHT_BLUE)
+def bright_magenta(text: String) = Formatted::colored(text, Color::BRIGHT_MAGENTA)
+def bright_cyan(text: String) = Formatted::colored(text, Color::BRIGHT_CYAN)
+def bright_white(text: String) = Formatted::colored(text, Color::BRIGHT_WHITE)
+
+
+// Handle the fail effect by running the onFailure code, then trying the code again.
+// This is repeated until the fail doesn't occur any longer.
+def retryUntilSuccess[A] {onFailure: => Unit} {code: => A / fail}: A = {
+    try { code() } with fail {
+        onFailure()
+        retryUntilSuccess {onFailure} {code}
+    }
+}
+
+// Handle the exception by running the onException code, then trying the code again.
+// This is repeated until the Exception doesn't occur any longer.
+def retryUntilSuccess[A, E] {onException: String => Unit} {code: => A / Exception[E]}: A = {
+  try { code() } with Exception[E] {
+    def raise(e, msg) = {
+      onException(msg)
+      retryUntilSuccess {onException} {code}
+    }
+  }
+}
+
+// Partial application of the above function with `on` proxy.
+def retry[A, E](proxy: on[E]) {onException: String => Unit} {code: => A / Exception[E]}: A = retryUntilSuccess {onException} {code}
+
+// Convert an Exception into a failure
+def failOn[A, E] { code: => A / Exception[E] }: A / fail = {
+    try { code() } with Exception[E] {
+        def raise(e, msg) = do fail()
+    }
+}
+
+// Partial application of the above function with `on` proxy.
+def fail[A, E](proxy: on[E]) { code: => A / Exception[E] }: A / fail = failOn { code }
+
+
+// Singleton for an Exception caused by a Failure
+record Failure()
+
+// Convert a failure into an Exception[Failure]
+def failureToException[A](msg: String) { code: => A / fail }: A / Exception[Failure] = {
+  try { code() } with fail {
+    do raise(Failure(), msg)
+  }
+}
+
+// Adaptation of the toInt function that uses an Exception with a message instead of a failure
+def toIntWithException(s: String) = failureToException("Could not convert string to int") { s.toInt }
