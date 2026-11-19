@@ -7,52 +7,65 @@ module src/nonstdlib
 
 import partial
 import exception
-import tty
 
 
-// Handle the fail effect by running the onFailure code, then trying the code again.
-// This is repeated until the fail doesn't occur any longer.
-def retryUntilSuccess[A] {onFailure: => Unit} {code: => A / fail}: A = {
-    try { code() } with fail {
+/// Handle the fail effect by running the onFailure program, then trying the program again.
+/// This is repeated until the fail doesn't occur any longer.
+def retryUntilSuccess[A] {onFailure: => Unit} { program: => A / fail }: A = {
+    try { program() } with fail {
         onFailure()
-        retryUntilSuccess {onFailure} {code}
+        retryUntilSuccess {onFailure} {program}
     }
 }
 
-// Handle the exception by running the onException code, then trying the code again.
-// This is repeated until the Exception doesn't occur any longer.
-def retryUntilSuccess[A, E] {onException: String => Unit} {code: => A / Exception[E]}: A = {
-  try { code() } with Exception[E] {
-    def raise(e, msg) = {
-      onException(msg)
-      retryUntilSuccess {onException} {code}
+/// Handle the exception by running the onException program, then trying the program again.
+/// This is repeated until the Exception doesn't occur any longer.
+def retryUntilSuccess[A, E] {onException: String => Unit} { program: => A / Exception[E] }: A = {
+    try { program() } with Exception[E] {
+        def raise(e, msg) = {
+            onException(msg)
+            retryUntilSuccess {onException} {program}
+        }
     }
-  }
 }
 
-// Partial application of the above function with `on` proxy.
-def retry[A, E](proxy: on[E]) {onException: String => Unit} {code: => A / Exception[E]}: A = retryUntilSuccess {onException} {code}
+/// Partial application of the above function with `on` proxy.
+def retry[A, E](proxy: on[E]) {onException: String => Unit} { program: => A / Exception[E] }: A =
+    retryUntilSuccess {onException} {program}
 
-// Convert an Exception into a failure
-def failOn[A, E] { code: => A / Exception[E] }: A / fail = {
-    try { code() } with Exception[E] {
+/// Convert an exception into a failure
+def failOn[A, E] { program: => A / Exception[E] }: A / fail = {
+    try { program() } with Exception[E] {
         def raise(e, msg) = do fail()
     }
 }
 
-// Partial application of the above function with `on` proxy.
-def fail[A, E](proxy: on[E]) { code: => A / Exception[E] }: A / fail = failOn { code }
+/// Partial application of the above function with `on` proxy.
+def fail[A, E](proxy: on[E]) { program: => A / Exception[E] }: A / fail =
+    failOn { program }
 
 
-// Singleton for an Exception caused by a Failure
-record Failure()
-
-// Convert a failure into an Exception[Failure]
-def failureToException[A](msg: String) { code: => A / fail }: A / Exception[Failure] = {
-  try { code() } with fail {
-    do raise(Failure(), msg)
-  }
+/// Convert a failure into an exception
+def failureToException[E, A](e: E, msg: String) { program: => A / fail }: A / Exception[E] = {
+    try { program() } with fail {
+        do raise(e, msg)
+    }
 }
 
-// Adaptation of the toInt function that uses an Exception with a message instead of a failure
-def toIntWithException(s: String) = failureToException("Could not convert string to int: \"" ++ s ++ "\"") { s.toInt }
+/// Adaptation of the string::toInt function that uses an exception with a message instead of a failure
+def toIntWithException(s: String) =
+    failureToException(WrongFormat(), "Could not convert string to int: \"" ++ s ++ "\"") { s.toInt }
+
+
+/// Computes a list of distinct elements of the list l, according to equality comparator eq.
+/// In case of multiple occurrences of a value, the last one is kept.
+///
+/// O(N²).
+def distinct[A](l: List[A]) { eq: (A, A) => Bool }: List[A] = l match {
+    case Nil()       => Nil()
+    case Cons(x, xs) => if (xs.contains(x) { eq }) {
+        distinct(xs) { eq }
+    } else {
+        Cons(x, distinct(xs) { eq })
+    }
+}
