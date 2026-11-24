@@ -21,7 +21,7 @@ def retryUntilSuccess[A] {onFailure: => Unit} { program: => A / fail }: A = {
 
 /// Handle the exception by running the onException program, then trying the program again.
 /// This is repeated until the Exception doesn't occur any longer.
-def retryUntilSuccess[E, A] {onException: String => Unit} { program: => A / Exception[E] }: A = {
+def retryUntilSuccess[A, E] {onException: String => Unit} { program: => A / Exception[E] }: A = {
     try { program() } with Exception[E] {
         def raise(e, msg) = {
             onException(msg)
@@ -31,7 +31,7 @@ def retryUntilSuccess[E, A] {onException: String => Unit} { program: => A / Exce
 }
 
 /// Partial application of the above function with `on` proxy.
-def retry[E, A](proxy: on[E]) {onException: String => Unit} { program: => A / Exception[E] }: A =
+def retry[A, E](proxy: on[E]) {onException: String => Unit} { program: => A / Exception[E] }: A =
     retryUntilSuccess {onException} {program}
 
 
@@ -40,19 +40,19 @@ def retry[E, A](proxy: on[E]) {onException: String => Unit} { program: => A / Ex
 // ========== Conversion between failure and exceptions ==========
 
 /// Convert an exception into a failure
-def failOn[E, A] { program: => A / Exception[E] }: A / fail = {
+def failOn[A, E] { program: => A / Exception[E] }: A / fail = {
     try { program() } with Exception[E] {
         def raise(e, msg) = do fail()
     }
 }
 
 /// Partial application of the above function with `on` proxy.
-def fail[E, A](proxy: on[E]) { program: => A / Exception[E] }: A / fail =
+def fail[A, E](proxy: on[E]) { program: => A / Exception[E] }: A / fail =
     failOn { program }
 
 
 /// Convert a failure into an exception
-def failureToException[E, A](e: E, msg: String) { program: => A / fail }: A / Exception[E] = {
+def failureToException[A, E](e: E, msg: String) { program: => A / fail }: A / Exception[E] = {
     try { program() } with fail {
         do raise(e, msg)
     }
@@ -75,14 +75,48 @@ def distinct[A](l: List[A]) { eq: (A, A) => Bool }: List[A] = l match {
     }
 }
 
+/// Compares two lists for element-wise equality, according to the equality comparator eq.
+/// (Advantage of having this: It works in the LLVM backend, unlike genericEquals)
+///
+/// O(N)
+def equals[A](left: List[A], right: List[A]) { eq: (A, A) => Bool }: Bool = {
+    def go(zipped: List[OneOrBoth[A, A]]): Bool = zipped match {
+        case Nil() => true // Both lists are empty
+        case Cons(head, tail) => head match {
+            case This(_) => false // left is longer than right
+            case That(_) => false // right is longer than left
+            case Both(a, b) => eq(a, b) && go(tail)
+        }
+    }
+
+    go(left.zipLongest(right))
+}
+
+// An equality `assert` for lists based on this should also be provided, but since I'm testing everything in this file,
+// that'd mean that I'd have to write assertions that my assertions work correctly... Which I think puts me too
+// far off the track of what I'm supposed to be doing, writing Mefisto ;)
+// Likewise, an assertEqual tailored for lists of primitive types (like List[Int], etc.) should also be done below for completeness...
+// What we have with this:
+// > assertEqual(['a', 'b', 'c'], ['a', 'b', 'c'], "...") { (left, right) => left.equals(right) { (x, y) => x == y } }
+// vs. What we could have:
+// > assert(['a', 'b', 'c'], ['a', 'b', 'c'], "...")
+
 
 
 // ========== Specific implementations of generic functions for certain concrete types / functions ==========
+//
+// I mainly wrote specific implementations for Ints, but for completeness, the remaining primitive types should
+// deserve their special implementations using default equality as well!
 
 /// Computes a list of distinct elements of the list l.
 ///
 /// O(N²).
 def distinct(l: List[Int]): List[Int] = distinct(l) { (x, y) => x == y }
+
+/// Compares two list for element-wise equality.
+///
+/// O(N)
+def equals(left: List[Int], right: List[Int]) = equals(left, right) { (x, y) => x == y }
 
 /// Check if the list contains the given `element`.
 ///

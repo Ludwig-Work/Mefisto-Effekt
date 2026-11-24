@@ -1,0 +1,436 @@
+module src/nonstdlib_test
+
+import process
+import test
+import src/nonstdlib
+
+
+// ⚠️ Temporary fix for faulty assertFail in standard library.
+// See https://github.com/se-tuebingen-epe/course/discussions/14
+def assertFail(?sourcePosition: SourcePosition) { body: => Unit / fail }: Unit / Assertion =
+  do assert(not(succeeds {body}), "Expected 'fail', but exited normally", sourcePosition)
+//          ^^^
+//          Fixes the incorrect behavior from the standard library
+
+
+
+def testRetryUntilSuccessFailure() = suite("retryUntilSuccess (failure)") {
+    test("Never failing") {
+        var x = 0
+        val res = retryUntilSuccess { 
+            assertTrue(false, "onFailure shouldn't be called when the program never fails")
+            x += 1
+        } {
+            if (false) do fail()
+            x
+        }
+        assert(res, 0, "Without any failure, res should be computed as 0.")
+    }
+
+    test("Failing once") {
+        var x = 0
+        val res = retryUntilSuccess {
+            assert(x, 0, "Failure should occur only once with x == 0")
+            x += 1
+        } {
+            if (x == 0) do fail()
+            x
+        }
+        assert(res, 1, "After one failure, res should be computed as 1.")
+    }
+
+    test("Failing multiple times") {
+        var x = 0
+        val res = retryUntilSuccess {
+            assertTrue(x < 10, "Failure should only occur with x < 10")
+            x += 1
+        } {
+            if (x < 10) do fail()
+            x
+        }
+        assert(res, 10, "After 10 failures, res should be computed as 10.")
+    }
+}
+
+record PleaseRetry()
+
+def testRetryUntilSuccessException() = suite("retryUntilSuccess (exception)") {
+    test("Never raising") {
+        var x = 0
+        val res = retryUntilSuccess[Int, PleaseRetry] { msg =>
+            assertTrue(false, "onException shouldn't be called when the program never fails, but was called with message: " ++ msg)
+            x += 1
+        } {
+            if (false) do raise(PleaseRetry(), "Retrying...")
+            x
+        }
+        assert(res, 0, "Without any exception, res should be computed as 0.")
+    }
+
+    test("Raising once") {
+        var x = 0
+        val res = retryUntilSuccess[Int, PleaseRetry] { msg =>
+            assert(x, 0, "Exception should occur only once with x == 0, but occurred again with message: " ++ msg)
+            x += 1
+        } {
+            if (x == 0) do raise(PleaseRetry(), "Retrying...")
+            x
+        }
+        assert(res, 1, "After one exception, res should be computed as 1.")
+    }
+
+    test("Raising multiple times") {
+        var x = 0
+        val res = retryUntilSuccess[Int, PleaseRetry] { msg =>
+            assertTrue(x < 10, "Exception should only occur with x < 10, but occurred again with message: " ++ msg)
+            x += 1
+        } {
+            if (x < 10) do raise(PleaseRetry(), "Retrying...")
+            x
+        }
+        assert(res, 10, "After 10 exceptions, res should be computed as 10.")
+    }
+}
+
+def testOnExceptionRetry() = suite("on[E].retry") {
+    test("Never raising") {
+        var x = 0
+        val res = on[PleaseRetry].retry { msg =>
+            assertTrue(false, "onException shouldn't be called when the program never fails, but was called with message: " ++ msg)
+            x += 1
+        } {
+            if (false) do raise(PleaseRetry(), "Retrying...")
+            x
+        }
+        assert(res, 0, "Without any exception, res should be computed as 0.")
+    }
+
+    test("Raising once") {
+        var x = 0
+        val res = on[PleaseRetry].retry { msg =>
+            assert(x, 0, "Exception should occur only once with x == 0, but occurred again with message: " ++ msg)
+            x += 1
+        } {
+            if (x == 0) do raise(PleaseRetry(), "Retrying...")
+            x
+        }
+        assert(res, 1, "After one exception, res should be computed as 1.")
+    }
+
+    test("Raising multiple times") {
+        var x = 0
+        val res = on[PleaseRetry].retry { msg =>
+            assertTrue(x < 10, "Exception should only occur with x < 10, but occurred again with message: " ++ msg)
+            x += 1
+        } {
+            if (x < 10) do raise(PleaseRetry(), "Retrying...")
+            x
+        }
+        assert(res, 10, "After 10 exceptions, res should be computed as 10.")
+    }
+}
+
+record PleaseFail()
+
+def testFailOn() = suite("failOn") {
+    test("Never raising") {
+        var x = 42
+        assertNoFail {
+            val res = failOn[Int, PleaseFail] {
+                if (false) do raise(PleaseFail(), "Failing!")
+                x
+            }
+            assert(res, 42, "Without any exception, res should be computed as 42.")
+        }
+    }
+
+    test("Raising") {
+        var x = 42
+        assertFail {
+            val res = failOn[Int, PleaseFail] {
+                do raise(PleaseFail(), "Failing!")
+                x
+            }
+            assertTrue(false, "After failing, res should not be computed at all! But is: " ++ res.show)
+        }
+    }
+}
+
+def testOnExceptionFail() = suite("on[E].fail") {
+    test("Never raising") {
+        var x = 42
+        assertNoFail {
+            val res = on[PleaseFail].fail {
+                if (false) do raise(PleaseFail(), "Failing!")
+                x
+            }
+            assert(res, 42, "Without any exception, res should be computed as 42.")
+        }
+    }
+
+    test("Raising") {
+        var x = 42
+        assertFail {
+            val res = on[PleaseFail].fail {
+                do raise(PleaseFail(), "Failing!")
+                x
+            }
+            assertTrue(false, "After failing, res should not be computed at all! But is: " ++ res.show)
+        }
+    }
+}
+
+def testFailureToException() = suite("failureToException") {
+    test("Never failing") {
+        var x = 42
+        assertNoThrow[PleaseFail] {
+            val res = failureToException(PleaseFail(), "There was a failure.") {
+                if (false) do fail()
+                x
+            }
+            assert(res, 42, "Without any failure, res should be computed as 42.")
+        }
+    }
+
+    test("Failing") {
+        var x = 42
+        assertThrows[PleaseFail] {
+            val res = failureToException(PleaseFail(), "There was a failure.") {
+                do fail()
+                42
+            }
+            assertTrue(false, "After raising an exception, res should not be computed at all! But is is: " ++ res.show)
+        }
+    }
+}
+
+def testDistinctGeneric() = suite("distinct[List[A]]") {
+    test("Nil") {
+        assertTrue(Nil[Char]().distinct { (x, y) => x == y }.isEmpty(), "Distinct of empty list should be empty")
+    }
+
+    test("Single element") {
+        assertEqual(['a'].distinct() { (x, y) => x == y }, ['a'], "Distinct of single element should be that element") { (left, right) => left.equals(right) { (x, y) => x == y } }
+    }
+
+    test("Repeated element") {
+        assertEqual(['a', 'a', 'a', 'a', 'a'].distinct() { (x, y) => x == y }, ['a'], "Distinct of repeated element should be that element just once") { (left, right) => left.equals(right) { (x, y) => x == y } }
+    }
+
+    test("Distinct elements") {
+        assertEqual(['e', 'd', 'c', 'b', 'a'].distinct() { (x, y) => x == y }, ['e', 'd', 'c', 'b', 'a'], "Distinct of distinct elements should not modify the list") { (left, right) => left.equals(right) { (x, y) => x == y } }
+    }
+
+    test("Mixed repeated and distinct elements") {
+        assertEqual(['a', 'b', 'c', 'b', 'd', 'e', 'c', 'e', 'f', 'g', 'f'].distinct() { (x, y) => x == y }, ['a', 'b', 'd', 'c', 'e', 'g', 'f'], 
+            "Distinct should filter duplicates and keep the last one of each value") { (left, right) => left.equals(right) { (x, y) => x == y } }
+    }
+
+    test("Modulo operation") {
+        assertEqual([1, 2, 3, 4, 5, 6].distinct() { (x, y) => x.mod(3) == y.mod(3) }, [4, 5, 6],
+            "Distinct can be used to filter by different criteria than equality, such as equivalence mod 3")
+    }
+}
+
+def testListEqualsGeneric() = suite("equals(List[A], List[A])") {
+    test("Nil") {
+        assertTrue(Nil[Char]().equals(Nil[Char]()) { (x, y) => x == y } , "Nil should equal Nil")
+    }
+
+    test("Equal single element list") {
+        assertTrue(['a'].equals(['a']) { (x, y) => x == y }, "['a'] should equal ['a']")
+    }
+
+    test("Non-equal single element list") {
+        assertFalse(['a'].equals(['b']) { (x, y) => x == y }, "['a'] should not equal ['b']")
+    }
+
+    test("Equal multiple-elements list") {
+        assertTrue(['a', 'b', 'c', 'a', 'e'].equals(['a', 'b', 'c', 'a', 'e']) { (x, y) => x == y }, "Equal lists of larger length")
+    }
+
+    test("Unequal multiple-elements list") {
+        assertFalse(['a', 'b', 'c', 'a', 'e'].equals(['a', 'b', 'c', 'd', 'e']) { (x, y) => x == y }, "Unequal lists of larger length")
+    }
+
+    test("Left longer than right") {
+        assertFalse(['a', 'b', 'c'].equals(['a', 'b']){ (x, y) => x == y }, "Left list is longer, shouldn't be equal")
+    }
+
+    test("Right longer than left") {
+        assertFalse(['a', 'b'].equals(['a', 'b', 'c']){ (x, y) => x == y }, "Right list is longer, shouldn't be equal")
+    }
+}
+
+def testListDistinctInt() = suite("distinct[List[Int]]") {
+    test("Nil") {
+        assertTrue(Nil[Int]().distinct().isEmpty(), "Distinct of empty list should be empty")
+    }
+
+    test("Single element") {
+        assertEqual([1].distinct(), [1], "Distinct of single element should be that element") { (left, right) => left.equals(right) { (x, y) => x == y } }
+    }
+
+    test("Repeated element") {
+        assertEqual([1, 1, 1, 1, 1].distinct(), [1], "Distinct of repeated element should be that element just once") { (left, right) => left.equals(right) { (x, y) => x == y } }
+    }
+
+    test("Distinct elements") {
+        assertEqual([5, 4, 3, 2, 1].distinct(), [5, 4, 3, 2, 1], "Distinct of distinct elements should not modify the list") { (left, right) => left.equals(right) { (x, y) => x == y } }
+    }
+
+    test("Mixed repeated and distinct elements") {
+        assertEqual([1, 2, 3, 2, 4, 5, 3, 5, 6, 7, 6].distinct(), [1, 2, 4, 3, 5, 7, 6], 
+            "Distinct should filter duplicates and keep the last one of each value") { (left, right) => left.equals(right) }
+    }
+}
+
+def testListEqualsInt() = suite("equals(List[Int], List[Int])") {
+    test("Nil") {
+        assertTrue(Nil[Int]().equals(Nil[Int]()) , "Nil should equal Nil")
+    }
+
+    test("Equal single element list") {
+        assertTrue([1].equals([1]), "[1] should equal [1]")
+    }
+
+    test("Non-equal single element list") {
+        assertFalse([1].equals([2]), "[1] should not equal [2]")
+    }
+
+    test("Equal multiple-elements list") {
+        assertTrue([1, 2, 3, 1, 5].equals([1, 2, 3, 1, 5]), "Equal lists of larger length")
+    }
+
+    test("Unequal multiple-elements list") {
+        assertFalse([1, 2, 3, 1, 5].equals([1, 2, 3, 4, 5]), "Unequal lists of larger length")
+    }
+
+    test("Left longer than right") {
+        assertFalse([1, 2, 3].equals([1, 2]), "Left list is longer, shouldn't be equal")
+    }
+
+    test("Right longer than left") {
+        assertFalse([1, 2].equals([1, 2, 3]), "Right list is longer, shouldn't be equal")
+    }
+}
+
+def testListContainsInt() = suite("contains(List[Int], Int)") {
+    test("Nil") {
+        assertFalse(Nil[Int]().contains(42), "Nil shouldn't contain elements")
+    }
+
+    test("Single element, contained") {
+        assertTrue([42].contains(42), "Single-element list should contain its (only) element")
+    }
+
+    test("Single element, not contained") {
+        assertFalse([42].contains(67), "Single-element list should not contain different element")
+    }
+
+    test("Multiple elements, contained once") {
+        assertTrue([40, 41, 42, 43, 44].contains(42), "List should contain an element inside it (once)")
+    }
+
+    test("Multiple elements, contained multiple times") {
+        assertTrue([40, 42, 42, 43, 42, 44].contains(42), "List should contain an element inside it (multiple times)")
+    }
+
+    test("Multiple elements, not contained") {
+        assertFalse([40, 41, 42, 43, 44].contains(67), "List should not contain an element not inside it")
+    }
+}
+
+def testListCountInt() = suite("count([List[Int], Int])") {
+    test("Nil") {
+        assert(Nil[Int]().count(42), 0, "Nil should have 0 elements")
+    }
+
+    test("Single element, contained") {
+        assert([42].count(42), 1, "Single-element list should contain its (only) element once")
+    }
+
+    test("Single element, not contained") {
+        assert([42].count(67), 0, "Single-element list should contain a different element 0 times")
+    }
+
+    test("Multiple elements, contained once") {
+        assert([40, 41, 42, 43, 44].count(42), 1, "List should contain an element inside it once")
+    }
+
+    test("Multiple elements, contained multiple times") {
+        assert([40, 42, 42, 43, 42, 44].count(42), 3, "List should contain an element inside it")
+    }
+
+    test("Multiple elements, not contained") {
+        assert([40, 41, 42, 43, 44].count(67), 0, "List should not contain an element not inside it")
+    }
+}
+
+def testToIntWithException() = suite("toIntWithException") {
+    test("42") {
+        assertNoThrow[WrongFormat] {
+            val res = "42".toIntWithException()
+            assert(res, 42, "Int should be parsed correctly")
+        }
+    }
+
+    test("-67") {
+        assertNoThrow[WrongFormat] {
+            val res = "-67".toIntWithException()
+            assert(res, -67, "Negative int should be parsed correctly")
+        }
+    }
+
+    test("Invalid int") {
+        assertThrows[WrongFormat] {
+            val res = "abc".toIntWithException()
+            assertTrue(false, "res shouldn't be computed for invalid int, but is: " ++ res.show)
+        }
+    }
+
+    test("Invalid int (start)") {
+        assertThrows[WrongFormat] {
+            val res = "a42".toIntWithException()
+            assertTrue(false, "res shouldn't be computed for invalid int, but is: " ++ res.show)
+        }
+    }
+
+    test("Invalid int (end)") {
+        assertThrows[WrongFormat] {
+            val res = "67z".toIntWithException()
+            assertTrue(false, "res shouldn't be computed for invalid int, but is: " ++ res.show)
+        }
+    }
+
+    test("Invalid int (middle)") {
+        assertThrows[WrongFormat] {
+            val res = "42+67".toIntWithException()
+            assertTrue(false, "res shouldn't be computed for invalid int, but is: " ++ res.show)
+        }
+    }
+}
+
+def main(): Unit = {
+    val testResults = [
+        ("retryUntilSuccess (failure)", testRetryUntilSuccessFailure()),
+        ("retryUntilSuccess (exception)", testRetryUntilSuccessException()),
+        ("on[E].retry", testOnExceptionRetry()),
+        ("failOn", testFailOn()),
+        ("on[E].fail", testOnExceptionFail()),
+        ("failureToException", testFailureToException()),
+        ("distinct[List[A]]", testDistinctGeneric()),
+        ("equals(List[A], List[A])", testListEqualsGeneric()),
+        ("distinct[List[Int]]", testListDistinctInt()),
+        ("equals(List[Int], List[Int])", testListEqualsInt()),
+        ("contains(List[Int], Int)", testListContainsInt()),
+        ("count([List[Int], Int])", testListCountInt()),
+        ("toIntWithException", testToIntWithException()),
+    ]
+
+    mainSuite("Main suite: nonstdlib") {
+        testResults.foreach {
+            case (name, res) => test("Suite: '" ++ name ++ "'") { assertTrue(res, "Suite '" ++ name ++ "' failed!") }
+        }
+    }
+}
