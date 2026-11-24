@@ -8,6 +8,7 @@ module src/nonstdlib
 import partial
 import exception
 
+// ========== Retry operations for failure and exceptions ==========
 
 /// Handle the fail effect by running the onFailure program, then trying the program again.
 /// This is repeated until the fail doesn't occur any longer.
@@ -20,7 +21,7 @@ def retryUntilSuccess[A] {onFailure: => Unit} { program: => A / fail }: A = {
 
 /// Handle the exception by running the onException program, then trying the program again.
 /// This is repeated until the Exception doesn't occur any longer.
-def retryUntilSuccess[A, E] {onException: String => Unit} { program: => A / Exception[E] }: A = {
+def retryUntilSuccess[E, A] {onException: String => Unit} { program: => A / Exception[E] }: A = {
     try { program() } with Exception[E] {
         def raise(e, msg) = {
             onException(msg)
@@ -30,18 +31,23 @@ def retryUntilSuccess[A, E] {onException: String => Unit} { program: => A / Exce
 }
 
 /// Partial application of the above function with `on` proxy.
-def retry[A, E](proxy: on[E]) {onException: String => Unit} { program: => A / Exception[E] }: A =
+def retry[E, A](proxy: on[E]) {onException: String => Unit} { program: => A / Exception[E] }: A =
     retryUntilSuccess {onException} {program}
 
+
+
+
+// ========== Conversion between failure and exceptions ==========
+
 /// Convert an exception into a failure
-def failOn[A, E] { program: => A / Exception[E] }: A / fail = {
+def failOn[E, A] { program: => A / Exception[E] }: A / fail = {
     try { program() } with Exception[E] {
         def raise(e, msg) = do fail()
     }
 }
 
 /// Partial application of the above function with `on` proxy.
-def fail[A, E](proxy: on[E]) { program: => A / Exception[E] }: A / fail =
+def fail[E, A](proxy: on[E]) { program: => A / Exception[E] }: A / fail =
     failOn { program }
 
 
@@ -52,10 +58,9 @@ def failureToException[E, A](e: E, msg: String) { program: => A / fail }: A / Ex
     }
 }
 
-/// Adaptation of the string::toInt function that uses an exception with a message instead of a failure
-def toIntWithException(s: String) =
-    failureToException(WrongFormat(), "Could not convert string to int: \"" ++ s ++ "\"") { s.toInt }
 
+
+// ========== List functions ==========
 
 /// Computes a list of distinct elements of the list l, according to equality comparator eq.
 /// In case of multiple occurrences of a value, the last one is kept.
@@ -69,3 +74,26 @@ def distinct[A](l: List[A]) { eq: (A, A) => Bool }: List[A] = l match {
         Cons(x, distinct(xs) { eq })
     }
 }
+
+
+
+// ========== Specific implementations of generic functions for certain concrete types / functions ==========
+
+/// Computes a list of distinct elements of the list l.
+///
+/// O(N²).
+def distinct(l: List[Int]): List[Int] = distinct(l) { (x, y) => x == y }
+
+/// Check if the list contains the given `element`.
+///
+/// O(N)
+def contains(l: List[Int], element: Int): Bool = contains(l, element) { (x, y) => x == y }
+
+/// Count how many times the given element is contained in the list.
+///
+/// O(N)
+def count(l: List[Int], element: Int): Int = count(l) { x => x == element }
+
+/// Adaptation of the string::toInt function that uses an exception with a message instead of a failure
+def toIntWithException(s: String) =
+    failureToException(WrongFormat(), "Could not convert string to int: \"" ++ s ++ "\"") { s.toInt }

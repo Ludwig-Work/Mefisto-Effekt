@@ -123,26 +123,20 @@ def consolePlayer[A] { program: => A / Player }: A = {
 
 def codeGuessResult(code: Code, guess: Code): GuessResult = {
     var correctPos = 0
-    var incorrectPos = 0
+    var unmatchedCode = Nil()   // Pins in the code that are NOT at the same position in the guess
+    var unmatchedGuess = Nil()  // Pins in the guess that are NOT at the same position in the code
 
-    guess.pins.foreachIndex { (gi, g) =>
-        var isAtCorrectPos = false
-        val codeAtThatIndex = on[OutOfBounds].panic { code.pins.get(gi) }
-        if (codeAtThatIndex == g) {
+    code.pins.zip(guess.pins).foreach {
+        case (c, g) => if (c == g) {
             correctPos += 1
-            isAtCorrectPos = true
+        } else {
+            unmatchedCode = Cons(c, unmatchedCode)
+            unmatchedGuess = Cons(g, unmatchedGuess)
         }
+    }
 
-        if (not(isAtCorrectPos)) {
-            var isAtIncorrectPos = false
-            code.pins.foreachIndex { (ci, c) =>
-                if (g == c && gi != ci) {
-                    isAtIncorrectPos = true
-                }
-            }
-            if (isAtIncorrectPos)
-                incorrectPos += 1
-        }
+    val incorrectPos = unmatchedGuess.distinct().foldLeft(0) { (sum, value) =>
+        sum + min(unmatchedCode.count(value), unmatchedGuess.count(value))
     }
 
     GuessResult(correctPos, incorrectPos)
@@ -182,9 +176,8 @@ def deterministicGameMaster[A](code: Code) { program: => A / GameMaster }: A / C
     }
 }
 
-def mastermindGameMaster[A] { program: => A / GameMaster }: A / { random, Config } = {
+def mastermindGameMaster[A] { program: => A / GameMaster }: A / { random, Config } =
     deterministicGameMaster(randomCode()) { program }
-}
 
 def defaultConfig[A] { program: => A / Config }: A = {
     try {
