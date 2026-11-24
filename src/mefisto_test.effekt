@@ -1,0 +1,193 @@
+module src/mefisto_test
+
+import random
+import test
+import tty
+import src/mefisto
+
+
+def testGetPinRepresentation() = suite("getPinRepresentation") {
+    test("without formatting") {
+        each(-20, 20) { i =>
+            with Formatted::noFormatting
+            assert(getPinRepresentation(i), i.show(), "Without formatting, pins are shown as plain numbers")
+        }
+    }
+
+    test("with formatting") {
+        each(0, 10) { i =>
+            with Formatted::formatting
+            val representation = getPinRepresentation(i)
+            assertTrue(representation.startsWith("\u001b["), "With formatting, numbers in the valid range [0, 10) get TTY colors")
+            assertTrue(representation.endsWith(i.show() ++ "\u001b[0m"), "With formatting, numbers in the valid range [0, 10) are still shown incl. reset")
+        }
+    }
+}
+
+
+def testGameLoop() = suite("gameLoop") {
+    test("First try right guess!") {
+        var makeGuessCalled = 0
+        var showBoardCalled = 0
+        var playerWinCalled = 0
+
+        with Formatted::noFormatting
+        with defaultConfig
+        with deterministicGameMaster(Code([1, 2, 3, 4, 0]))
+        try { gameLoop() } with Player {
+            def makeGuess() = {
+                assert(makeGuessCalled, 0, "makeGuess should be called only once, since player wins immediately")
+                assert(showBoardCalled, 1, "showBoard should have been called before makeGuess")
+                assert(playerWinCalled, 0, "playerWin should not have been called before makeGuess")
+                makeGuessCalled += 1
+                resume { Code([1, 2, 3, 4, 0]) }
+            }
+            def showBoard(attempts: List[(Code, GuessResult)]) = {
+                assert(makeGuessCalled, 0, "showBoard should be called before makeGuess")
+                assert(showBoardCalled, 0, "showBoard should be called exactly once")
+                assert(playerWinCalled, 0, "playerWin cannot happen before first showing board")
+                showBoardCalled += 1
+                resume {}
+            }
+            def playerWin(code: String, attempts: List[(Code, GuessResult)]) = {
+                assert(makeGuessCalled, 1, "After one correct guess, game should end")
+                assert(showBoardCalled, 1, "Board should be shown before guess, exactly once")
+                assert(playerWinCalled, 0, "playerWin should only be called once")
+                playerWinCalled += 1
+                resume {}
+            }
+        }
+        assert(makeGuessCalled, 1, "Player should have guessed exactly once")
+        assert(showBoardCalled, 1, "Board should have been shown exactly once")
+        assert(playerWinCalled, 1, "Player win should be called exactly once")
+    }
+
+    test("Second try right guess!") {
+        var makeGuessCalled = 0
+        var showBoardCalled = 0
+        var playerWinCalled = 0
+
+        with Formatted::noFormatting
+        with defaultConfig
+        with deterministicGameMaster(Code([1, 2, 3, 4, 0]))
+        try { gameLoop() } with Player {
+            def makeGuess() = {
+                assert(playerWinCalled, 0, "playerWin should not have been called before makeGuess")
+
+                if (makeGuessCalled == 0) {
+                    assert(showBoardCalled, 1, "showBoard should have been called before makeGuess")
+                } else {
+                    assert(makeGuessCalled, 1, "makeGuess should be called only twice, since player wins after second guess")
+                    assert(showBoardCalled, 2, "showBoard should have been called before each call of makeGuess")
+                }
+                makeGuessCalled += 1
+                resume { if (makeGuessCalled == 1) Code([1, 2, 3, 4, 5]) else Code([1, 2, 3, 4, 0]) }
+            }
+            def showBoard(attempts: List[(Code, GuessResult)]) = {
+                assert(playerWinCalled, 0, "playerWin cannot happen before showing board")
+
+                if (showBoardCalled == 0) {
+                    assert(makeGuessCalled, 0, "showBoard should be called before makeGuess")
+                } else {
+                    assert(makeGuessCalled, 1, "second showBoard should be called before second makeGuess")
+                    assert(showBoardCalled, 1, "showBoard should be called exactly twice, since player wins after second guess")
+                }
+                showBoardCalled += 1
+                resume {}
+            }
+            def playerWin(code: String, attempts: List[(Code, GuessResult)]) = {
+                assert(makeGuessCalled, 2, "After two correct guesses, game should end")
+                assert(showBoardCalled, 2, "Board should be shown before each guess, i.e. exactly twice")
+                assert(playerWinCalled, 0, "playerWin should only be called once")
+                playerWinCalled += 1
+                resume {}
+            }
+        }
+        assert(makeGuessCalled, 2, "Player should have guessed exactly once")
+        assert(showBoardCalled, 2, "Board should have been shown exactly once")
+        assert(playerWinCalled, 1, "Player win should be called exactly once")
+    }
+}
+
+def testCodeGuessResult() = suite("codeGuessResult") {
+    test("All correct") {
+        assertTrue(if (codeGuessResult(Code([1, 2, 3, 4, 0]), Code([1, 2, 3, 4, 0])) is GuessResult(5, 0)) true else false, "All correct")
+        assertTrue(if (codeGuessResult(Code([1, 2, 1, 2, 2]), Code([1, 2, 1, 2, 2])) is GuessResult(5, 0)) true else false, "All correct (with repeats)")
+    }
+
+    test("All wrong") {
+        assertTrue(if (codeGuessResult(Code([0, 1, 2, 3, 4]), Code([5, 6, 7, 8, 9])) is GuessResult(0, 0)) true else false, "All wrong")
+        assertTrue(if (codeGuessResult(Code([0, 1, 0, 1, 0]), Code([3, 3, 3, 4, 3])) is GuessResult(0, 0)) true else false, "All wrong (with repeats)")
+    }
+
+    test("All incorrect position") {
+        assertTrue(if (codeGuessResult(Code([0, 1, 2, 3, 4]), Code([1, 2, 3, 4, 0])) is GuessResult(0, 5)) true else false, "All incorrect position")
+        assertTrue(if (codeGuessResult(Code([2, 2, 3, 4, 4]), Code([3, 4, 4, 2, 2])) is GuessResult(0, 5)) true else false, "All incorrect position (with repeats)")
+    }
+
+    // I know this is plenty of test cases, but it actually took me some time to get this algorithm right.
+    // Therefore, let's double confirm it really *is* right!
+    test("'Normal' cases") {
+        assertTrue(if (codeGuessResult(Code([0, 1, 2, 3, 4]), Code([0, 1, 4, 3, 5])) is GuessResult(3, 1)) true else false, "Some right, some incorrect position, some wrong")
+        assertTrue(if (codeGuessResult(Code([0, 1, 2, 3, 4]), Code([2, 2, 2, 2, 2])) is GuessResult(1, 0)) true else false, "Constant guess, one pin right")
+        assertTrue(if (codeGuessResult(Code([2, 2, 2, 2, 4]), Code([2, 2, 2, 2, 2])) is GuessResult(4, 0)) true else false, "Constant guess, four pins right")
+        assertTrue(if (codeGuessResult(Code([0, 1, 1, 3, 4]), Code([1, 1, 1, 2, 2])) is GuessResult(2, 0)) true else false, "Two pins right, none incorrect position")
+        assertTrue(if (codeGuessResult(Code([0, 1, 2, 3, 4]), Code([3, 4, 5, 6, 7])) is GuessResult(0, 2)) true else false, "No pins right, two incorrect position")
+        assertTrue(if (codeGuessResult(Code([0, 1, 2, 3, 4]), Code([3, 4, 5, 6, 4])) is GuessResult(1, 1)) true else false, "One pin right, one(!) incorrect position")
+    }
+}
+
+def testRandomCodeProducesValidCodes() = suite("randomCode produces valid codes") {
+    test("Default config: Multiple random codes are all valid") {
+        with defaultConfig
+        with minstd(59348)
+        each(0, 1000) { i =>
+            assertNoThrow[WrongFormat] {
+                validateCode(randomCode())
+            }
+        }
+    }
+
+    test("Larger config: Multiple random codes are all valid") {
+        with minstd(69547)
+        try {
+            each(0, 1000) { i =>
+                assertNoThrow[WrongFormat] {
+                    validateCode(randomCode())
+                }
+            }
+        } with Config {
+            def getCodeLength() = resume(100)
+            def getNumColors() = resume(20)
+        }
+    }
+
+    test("Smaller config: Multiple random codes are all valid") {
+        with minstd(92319)
+        try {
+            each(0, 1000) { i =>
+                assertNoThrow[WrongFormat] {
+                    validateCode(randomCode())
+                }
+            }
+        } with Config {
+            def getCodeLength() = resume(2)
+            def getNumColors() = resume(2)
+        }
+    }
+}
+
+def main() = {
+    val testResults = [
+        ("getPinReresentation", testGetPinRepresentation()),
+        ("gameLoop", testGameLoop()),
+        ("codeGuessResult", testCodeGuessResult()),
+        ("randomCode produces valid codes", testRandomCodeProducesValidCodes()),
+    ]
+
+    mainSuite("Main suite: mefisto") {
+        testResults.foreach {
+            case (name, res) => test("Suite: '" ++ name ++ "'") { assertTrue(res, "Suite '" ++ name ++ "' failed!") }
+        }
+    }
+}

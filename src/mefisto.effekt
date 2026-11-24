@@ -50,27 +50,38 @@ def show(gr: GuessResult) = gr match {
     case GuessResult(correctPos, incorrectPos) => bold(green(correctPos.show)) ++ "/" ++ bold(yellow(incorrectPos.show))
 }
 
+// Represents the game configuration:
+// -> Length of the secret code (number of pins)
+// -> Number of colors (different possible pin values)
 interface Config {
     def getCodeLength(): Int
     def getNumColors(): Int
 }
 
+// Represents the game master:
+// -> When a guess is entered, it responds with a GuessResult
+// -> It can reveal the hidden code (at game end)
 interface GameMaster {
     def guessResult(guess: Code): GuessResult
     def showSecretCode(): String / Formatted
 }
 
+// Represents the player:
+// -> It can make a guess, based on the given config
+// -> The board can be displayed to the player
+// -> When the player wins, an action can be triggered (there is no losing in this game. Just not having won *yet*.)
 interface Player {
     def makeGuess(): Code / Config
     def showBoard(attempts: List[(Code, GuessResult)]): Unit / Formatted
     def playerWin(code: String, attempts: List[(Code, GuessResult)]): Unit / Formatted
 }
 
+// The basic game loop, agnostic of the exact Player, GameMaster or Config implementation.
+// This is the high level game routine that needs to be augmented by handlers to play.
 def gameLoop(): Unit / { Formatted, Player, GameMaster, Config } = {
     var guesses: List[(Code, GuessResult)] = Nil()
-    var won = false
 
-    while (not(won)) {
+    loop { {l} =>
         do showBoard(guesses.reverse)
         val guess = do makeGuess()
         val result = do guessResult(guess)
@@ -78,12 +89,13 @@ def gameLoop(): Unit / { Formatted, Player, GameMaster, Config } = {
         guesses = Cons((guess, result), guesses)
 
         if (result.correctPos == do getCodeLength()) {
-            won = true
             do playerWin(do showSecretCode(), guesses.reverse)
+            l.break()
         }
     }
 }
 
+// A `Player` handler that shows the board to STDOUT and reads guesses from STDIN.
 def consolePlayer[A] { program: => A / Player }: A = {
     def showBoardConsole(code: String, attempts: List[(Code, GuessResult)]) = {
         println("+----------------------------------------+")
@@ -121,6 +133,8 @@ def consolePlayer[A] { program: => A / Player }: A = {
     }
 }
 
+// Helper: Computes a `GuessResult` for a given `guess` and secret `code`.
+// This is irrelevant to the Mefisto game master, as there is no single secret `code`.
 def codeGuessResult(code: Code, guess: Code): GuessResult = {
     var correctPos = 0
     var unmatchedCode = Nil()   // Pins in the code that are NOT at the same position in the guess
@@ -142,6 +156,7 @@ def codeGuessResult(code: Code, guess: Code): GuessResult = {
     GuessResult(correctPos, incorrectPos)
 }
 
+// Produces a (uniformly) random code that is allowed according to the game `Config`.
 def randomCode(): Code / { random, Config } = {
     var pins = Nil()
     each(0, do getCodeLength()) { i =>
@@ -150,6 +165,7 @@ def randomCode(): Code / { random, Config } = {
     Code(pins)
 }
 
+// Confirms whether the given `code` is valid according to the `Config`, and raises `WrongFormat` if it isn't.
 def validateCode(code: Code): Unit / { Config, Exception[WrongFormat] } = {
     val codeLength = code.pins.size
     val expectedCodeLength = do getCodeLength()
@@ -163,6 +179,7 @@ def validateCode(code: Code): Unit / { Config, Exception[WrongFormat] } = {
     }
 }
 
+// A `GameMaster` handler that deterministically uses the given `code` as its secret code.
 def deterministicGameMaster[A](code: Code) { program: => A / GameMaster }: A / Config = {
     on[WrongFormat].panic {
         validateCode(code)
@@ -176,9 +193,29 @@ def deterministicGameMaster[A](code: Code) { program: => A / GameMaster }: A / C
     }
 }
 
+// A `GameMaster` handler for (basic) MasterMind: It decides for one random code,
+// then deterministically answers based on this code.
 def mastermindGameMaster[A] { program: => A / GameMaster }: A / { random, Config } =
     deterministicGameMaster(randomCode()) { program }
 
+// A `GameMaster` for Mefisto: It does not settle for a specific code until it is
+// really forced to! Instead, it tries to keep the search space for the player
+// as large as possible.
+def mefistoGameMaster[A] { program: => A / GameMaster }: A / { Config } = {
+    var guesses = Nil[Code]()
+
+    try {
+        program()
+    } with GameMaster {
+        def guessResult(guess: Code) = {
+            guesses = Cons(guess, guesses)
+            resume(GuessResult(0, 0))
+        }
+        def showSecretCode() = resume { "😂" }
+    }
+}
+
+// A `Config` handler, with the default settings: Code length of 5 with 7 different colors.
 def defaultConfig[A] { program: => A / Config }: A = {
     try {
         program()
@@ -188,6 +225,7 @@ def defaultConfig[A] { program: => A / Config }: A = {
     }
 }
 
+// Apply handlers to the `gameLoop` to get playing!
 def play() = {
     with Formatted::formatting
     with defaultConfig

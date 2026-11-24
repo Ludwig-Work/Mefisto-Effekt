@@ -8,9 +8,9 @@ import src/nonstdlib
 // ⚠️ Temporary fix for faulty assertFail in standard library.
 // See https://github.com/se-tuebingen-epe/course/discussions/14
 def assertFail(?sourcePosition: SourcePosition) { body: => Unit / fail }: Unit / Assertion =
-  do assert(not(succeeds {body}), "Expected 'fail', but exited normally", sourcePosition)
-//          ^^^
-//          Fixes the incorrect behavior from the standard library
+    do assert(not(succeeds {body}), "Expected 'fail', but exited normally", sourcePosition)
+//            ^^^
+//            Fixes the incorrect behavior from the standard library
 
 
 
