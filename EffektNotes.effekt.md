@@ -21,3 +21,31 @@ Two notes on this:
   ```
 
 For now, I put generic functions, some of which I could imagine as stdlib functions, into `nonstdlib.effekt`.
+
+
+
+Something confusing I figured out today: If a handler takes a block that has effects which are *not* handled by the handler,
+you cannot just pass a function's name in the block, but you need to call it explicitly with brackets.
+Otherwise, you get the error that the non-handled effect is unexpected in this context.
+I expect the non-handled effect to just bubble through, which is precisely the behavior you get when you put the brackets.
+
+```
+effect a(): Unit
+effect b(): Unit
+
+def handleA { program: => Unit / a }: Unit =
+  try { program() } with a { () }
+
+def useA(): Unit / a =
+  do a()
+
+def useAAndB(): Unit / { a, b } = {
+  do a()
+  do b()
+}
+
+def problemDemonstration(): Unit / b = {
+  handleA { useA } // <-- perfectly valid without brackets
+  handleA { useAAndB() } // <-- Here, the brackets are required, otherwise (unclear, at least to me) error!
+}
+```

@@ -198,20 +198,58 @@ def deterministicGameMaster[A](code: Code) { program: => A / GameMaster }: A / C
 def mastermindGameMaster[A] { program: => A / GameMaster }: A / { random, Config } =
     deterministicGameMaster(randomCode()) { program }
 
+
+// Producer stream of possible valid codes after the given guesses have been made and gotten
+// the respective GuessResults. Uses the choice effect to make decisions about the
+// code (and produces *all* possible codes in combination with the allChoices handler).
+def possibleCodes(guesses: List[(Code, GuessResult)]): Unit / { choice, emit[Code], Config } = {
+    <>
+}
+
+// Helper and heart of the evil Mefisto game mode: From the given guess and prior guesses,
+// returns a GuessResult that leaves the remaining search space as large as possible.
+def mefistoCodeGuessResult(guess: Code, priorGuesses: List[(Code, GuessResult)]): GuessResult / Config = {
+    var maxResultSpace = 0
+    var bestGuessResult = GuessResult(5, 0)
+
+    each(0, do getCodeLength() + 1) { correctPos =>
+        each(0, do getCodeLength() - correctPos + 1) { incorrectPos => {
+            val guessResult = GuessResult(correctPos, incorrectPos)
+            val resultSpace = stream::count[Code] { allChoices { possibleCodes(Cons((guess, guessResult), priorGuesses)) } }
+
+            if (resultSpace > maxResultSpace) {
+                maxResultSpace = resultSpace
+                bestGuessResult = guessResult
+            }
+        }}
+    }
+
+    bestGuessResult
+}
+
 // A `GameMaster` for Mefisto: It does not settle for a specific code until it is
 // really forced to! Instead, it tries to keep the search space for the player
 // as large as possible.
 def mefistoGameMaster[A] { program: => A / GameMaster }: A / { Config } = {
-    var guesses = Nil[Code]()
+    var guesses = Nil[(Code, GuessResult)]()
 
     try {
         program()
     } with GameMaster {
         def guessResult(guess: Code) = {
-            guesses = Cons(guess, guesses)
-            resume(GuessResult(0, 0))
+            val result = mefistoCodeGuessResult(guess, guesses)
+            guesses = Cons((guess, result), guesses)
+            resume(result)
         }
-        def showSecretCode() = resume { "😂" }
+        def showSecretCode() = resume {
+            try {
+                allChoices { possibleCodes(guesses) }
+                panic("No valid code was found!")
+                <>
+            } with emit[Code] { c =>
+                c.show() // We just use the first one we find, no need to resume and enumerate more
+            }
+        }
     }
 }
 

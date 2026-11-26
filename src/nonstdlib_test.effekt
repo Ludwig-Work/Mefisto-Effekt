@@ -17,7 +17,7 @@ def assertFail(?sourcePosition: SourcePosition) { body: => Unit / fail }: Unit /
 def testRetryUntilSuccessFailure() = suite("retryUntilSuccess (failure)") {
     test("Never failing") {
         var x = 0
-        val res = retryUntilSuccess { 
+        val res = retryUntilSuccess {
             assertTrue(false, "onFailure shouldn't be called when the program never fails")
             x += 1
         } {
@@ -204,6 +204,86 @@ def testFailureToException() = suite("failureToException") {
     }
 }
 
+def testChoice() = suite("choice effect") {
+    test("No choice") {
+        def notActuallyChoosing(): Unit / { choice, emit[Int] } = {
+            if (false) { do choice(123); () }
+            do emit(42)
+        }
+
+        val res1 = list::collect[Int] { try { notActuallyChoosing() } with choice { maxInclusive => resume(0) } }
+        val res2 = list::collect[Int] { try { notActuallyChoosing() } with choice { maxInclusive => resume(123) } }
+        val res3 = list::collect[Int] { try { notActuallyChoosing() } with choice { maxInclusive => resume(5) } }
+        assertTrue(res1.equals([42]), "res1 should be [42] as choice is never called.")
+        assertTrue(res2.equals([42]), "res2 should be [42] as choice is never called.")
+        assertTrue(res3.equals([42]), "res3 should be [42] as choice is never called.")
+    }
+
+    test("Using the choice") {
+        def addingTwoNumbers(): Unit / { choice, emit[Int] } = {
+            do emit(do choice(5) + do choice(3))
+            do emit(12345)
+        }
+
+        val maxPossibleResult = list::collect[Int] { try { addingTwoNumbers() } with choice { maxInclusive => resume(maxInclusive) } }
+        val minPossibleResult = list::collect[Int] { try { addingTwoNumbers() } with choice { maxInclusive => resume(0) } }
+        assertTrue(maxPossibleResult.equals([8, 12345]), "Adding with the maximum choices 5 and 3 should be 8. Second element emitted independently.")
+        assertTrue(minPossibleResult.equals([0, 12345]), "Adding with the minimum choices (always 0) should be 0. Second element emitted independently.")
+    }
+
+    test("Choice with multiple resumption") {
+        val result = list::collect[Int] {
+            try {
+                do emit(do choice(10))
+            } with choice { maxInclusive =>
+                resume(1)
+                resume(3)
+                resume(7)
+            }
+        }
+        assertTrue(result.equals([1, 3, 7]), "Multiple resumption should build list accordingly.")
+    }
+}
+
+def testAllChoices() = suite("allChoices handler") {
+    test("No choice") {
+        def notActuallyChoosing(): Unit / { choice, emit[Int] } = {
+            if (false) { do choice(123); () }
+            do emit(42)
+        }
+
+        val res = list::collect[Int] { allChoices { notActuallyChoosing() } }
+        assertTrue(res.equals([42]), "res should be [42] as choice is never called.")
+    }
+
+    test("Using the choice") {
+        def choiceToList(upTo: Int): Unit / { choice, emit[Int] } = {
+            do emit(do choice(upTo))
+        }
+
+        val res1 = list::collect[Int] { allChoices { choiceToList(-1) } }
+        val res2 = list::collect[Int] { allChoices { choiceToList(0) } }
+        val res3 = list::collect[Int] { allChoices { choiceToList(10) } }
+        assertTrue(res1.equals([]), "maxInclusive of less than 0 cannot be satisfied, there are no choices.")
+        assertTrue(res2.equals([0]), "Since max is inclusive, a one-element list [0] should be built.")
+        assertTrue(res3.equals([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), "11 choices are emitted correctly.")
+    }
+
+    test("choice to decide one of two values") {
+        def decide(): Unit / { choice, emit[String] } = {
+            if (do choice(1) == 0) {
+                do emit("Hello")
+                do emit("World")
+            } else {
+                do emit("Byebye")
+            }
+        }
+
+        val res = list::collect[String] { allChoices { decide() } }
+        assertTrue(res.equals(["Hello", "World", "Byebye"]) { (x, y) => x == y }, "Both choices are made and all values are collected")
+    }
+}
+
 def testDistinctGeneric() = suite("distinct[List[A]]") {
     test("Nil") {
         assertTrue(Nil[Char]().distinct { (x, y) => x == y }.isEmpty(), "Distinct of empty list should be empty")
@@ -222,7 +302,7 @@ def testDistinctGeneric() = suite("distinct[List[A]]") {
     }
 
     test("Mixed repeated and distinct elements") {
-        assertEqual(['a', 'b', 'c', 'b', 'd', 'e', 'c', 'e', 'f', 'g', 'f'].distinct() { (x, y) => x == y }, ['a', 'b', 'd', 'c', 'e', 'g', 'f'], 
+        assertEqual(['a', 'b', 'c', 'b', 'd', 'e', 'c', 'e', 'f', 'g', 'f'].distinct() { (x, y) => x == y }, ['a', 'b', 'd', 'c', 'e', 'g', 'f'],
             "Distinct should filter duplicates and keep the last one of each value") { (left, right) => left.equals(right) { (x, y) => x == y } }
     }
 
@@ -280,7 +360,7 @@ def testListDistinctInt() = suite("distinct[List[Int]]") {
     }
 
     test("Mixed repeated and distinct elements") {
-        assertEqual([1, 2, 3, 2, 4, 5, 3, 5, 6, 7, 6].distinct(), [1, 2, 4, 3, 5, 7, 6], 
+        assertEqual([1, 2, 3, 2, 4, 5, 3, 5, 6, 7, 6].distinct(), [1, 2, 4, 3, 5, 7, 6],
             "Distinct should filter duplicates and keep the last one of each value") { (left, right) => left.equals(right) }
     }
 }
@@ -421,6 +501,8 @@ def main(): Unit = {
         ("failureToException", testFailureToException()),
         ("distinct[List[A]]", testDistinctGeneric()),
         ("equals(List[A], List[A])", testListEqualsGeneric()),
+        ("choice effect", testChoice()),
+        ("allChoices handler", testAllChoices()),
         ("distinct[List[Int]]", testListDistinctInt()),
         ("equals(List[Int], List[Int])", testListEqualsInt()),
         ("contains(List[Int], Int)", testListContainsInt()),

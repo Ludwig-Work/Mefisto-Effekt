@@ -59,6 +59,22 @@ def failureToException[A, E](e: E, msg: String) { program: => A / fail }: A / Ex
 }
 
 
+// ========== "choice" effekt (inspired by "flip" from lectures) ==========
+
+/// Effect to get an integer from 0 to inclusiveMax.
+/// The max is inclusive purely for consistency with randomInt
+/// (which I dislike, I have never seen the max being inclusive in any other language...)
+effect choice(inclusiveMax: Int): Int
+
+/// Handler for the choice effect, that builds a flat list of the results for all possible choices.
+def allChoices { program: => Unit / choice }: Unit = {
+    try {
+        program()
+    } with choice { maxInclusive =>
+        each(0, maxInclusive + 1) { i => resume(i) }
+    }
+}
+
 
 // ========== List functions ==========
 
