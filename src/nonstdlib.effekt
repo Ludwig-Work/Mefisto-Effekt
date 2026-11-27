@@ -5,8 +5,9 @@ module src/nonstdlib
 // (I don't really see any advantage in having the `fail` effect at all tbh, Exceptions seem just more powerful with
 // the `on` handlers and the attached messages, so why maintain both?)
 
-import partial
 import exception
+import partial
+import random
 
 // ========== Retry operations for failure and exceptions ==========
 
@@ -64,14 +65,25 @@ def failureToException[A, E](e: E, msg: String) { program: => A / fail }: A / Ex
 /// Effect to get an integer from 0 to inclusiveMax.
 /// The max is inclusive purely for consistency with randomInt
 /// (which I dislike, I have never seen the max being inclusive in any other language...)
-effect choice(inclusiveMax: Int): Int
+effect choice(min: Int, inclusiveMax: Int): Int
 
-/// Handler for the choice effect, that builds a flat list of the results for all possible choices.
+/// Handler for the choice effect that runs the program for every possible choice option.
+/// Does not resume the program on a choice with min > maxInclusive.
 def allChoices { program: => Unit / choice }: Unit = {
-    try {
-        program()
-    } with choice { maxInclusive =>
-        each(0, maxInclusive + 1) { i => resume(i) }
+    try { program() } with choice { (min, maxInclusive) =>
+        each(min, maxInclusive + 1) { i => resume(i) }
+    }
+}
+
+/// Handler for the choice effect that runs the program once, with random choices.
+/// Raises OutOfBounds on a choice with min > maxInclusive.
+def randomChoice[A] { program: => A / choice }: A / { random, Exception[OutOfBounds] } = {
+    try { program() } with choice { (min, maxInclusive) =>
+        if (min > maxInclusive) {
+            do raise(OutOfBounds(), "choice was called with min " ++ min.show ++ "which is greater than maxInclusive " ++ maxInclusive.show)
+        } else {
+            resume(randomInt(min, maxInclusive))
+        }
     }
 }
 

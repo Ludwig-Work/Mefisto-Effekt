@@ -1,6 +1,7 @@
 module src/nonstdlib_test
 
 import process
+import random
 import test
 import src/nonstdlib
 
@@ -207,13 +208,13 @@ def testFailureToException() = suite("failureToException") {
 def testChoice() = suite("choice effect") {
     test("No choice") {
         def notActuallyChoosing(): Unit / { choice, emit[Int] } = {
-            if (false) { do choice(123); () }
+            if (false) { do choice(100, 123); () }
             do emit(42)
         }
 
-        val res1 = list::collect[Int] { try { notActuallyChoosing() } with choice { maxInclusive => resume(0) } }
-        val res2 = list::collect[Int] { try { notActuallyChoosing() } with choice { maxInclusive => resume(123) } }
-        val res3 = list::collect[Int] { try { notActuallyChoosing() } with choice { maxInclusive => resume(5) } }
+        val res1 = list::collect[Int] { try { notActuallyChoosing() } with choice { (min, maxInclusive) => resume(0) } }
+        val res2 = list::collect[Int] { try { notActuallyChoosing() } with choice { (min, maxInclusive) => resume(123) } }
+        val res3 = list::collect[Int] { try { notActuallyChoosing() } with choice { (min, maxInclusive) => resume(5) } }
         assertTrue(res1.equals([42]), "res1 should be [42] as choice is never called.")
         assertTrue(res2.equals([42]), "res2 should be [42] as choice is never called.")
         assertTrue(res3.equals([42]), "res3 should be [42] as choice is never called.")
@@ -221,21 +222,21 @@ def testChoice() = suite("choice effect") {
 
     test("Using the choice") {
         def addingTwoNumbers(): Unit / { choice, emit[Int] } = {
-            do emit(do choice(5) + do choice(3))
+            do emit(do choice(0, 5) + do choice(0, 3))
             do emit(12345)
         }
 
-        val maxPossibleResult = list::collect[Int] { try { addingTwoNumbers() } with choice { maxInclusive => resume(maxInclusive) } }
-        val minPossibleResult = list::collect[Int] { try { addingTwoNumbers() } with choice { maxInclusive => resume(0) } }
+        val maxPossibleResult = list::collect[Int] { try { addingTwoNumbers() } with choice { (min, maxInclusive) => resume(maxInclusive) } }
+        val minPossibleResult = list::collect[Int] { try { addingTwoNumbers() } with choice { (min, maxInclusive) => resume(min) } }
         assertTrue(maxPossibleResult.equals([8, 12345]), "Adding with the maximum choices 5 and 3 should be 8. Second element emitted independently.")
-        assertTrue(minPossibleResult.equals([0, 12345]), "Adding with the minimum choices (always 0) should be 0. Second element emitted independently.")
+        assertTrue(minPossibleResult.equals([0, 12345]), "Adding with the minimum choices 0 and 0 should be 0. Second element emitted independently.")
     }
 
     test("Choice with multiple resumption") {
         val result = list::collect[Int] {
             try {
-                do emit(do choice(10))
-            } with choice { maxInclusive =>
+                do emit(do choice(1, 10))
+            } with choice { (min, maxInclusive) =>
                 resume(1)
                 resume(3)
                 resume(7)
@@ -248,7 +249,7 @@ def testChoice() = suite("choice effect") {
 def testAllChoices() = suite("allChoices handler") {
     test("No choice") {
         def notActuallyChoosing(): Unit / { choice, emit[Int] } = {
-            if (false) { do choice(123); () }
+            if (false) { do choice(100, 123); () }
             do emit(42)
         }
 
@@ -257,21 +258,23 @@ def testAllChoices() = suite("allChoices handler") {
     }
 
     test("Using the choice") {
-        def choiceToList(upTo: Int): Unit / { choice, emit[Int] } = {
-            do emit(do choice(upTo))
+        def choiceToStream(min: Int, maxInclusive: Int): Unit / { choice, emit[Int] } = {
+            do emit(do choice(min, maxInclusive))
         }
 
-        val res1 = list::collect[Int] { allChoices { choiceToList(-1) } }
-        val res2 = list::collect[Int] { allChoices { choiceToList(0) } }
-        val res3 = list::collect[Int] { allChoices { choiceToList(10) } }
-        assertTrue(res1.equals([]), "maxInclusive of less than 0 cannot be satisfied, there are no choices.")
-        assertTrue(res2.equals([0]), "Since max is inclusive, a one-element list [0] should be built.")
+        val res1 = list::collect[Int] { allChoices { choiceToStream(-5, -1) } }
+        val res2 = list::collect[Int] { allChoices { choiceToStream(0, 0) } }
+        val res3 = list::collect[Int] { allChoices { choiceToStream(0, 10) } }
+        val res4 = list::collect[Int] { allChoices { choiceToStream(3, 0) } }
+        assertTrue(res1.equals([-5, -4, -3, -2, -1]), "Negative numbers can be choices, too.")
+        assertTrue(res2.equals([0]), "For min == maxInclusive, a one-element list [0] should be built.")
         assertTrue(res3.equals([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), "11 choices are emitted correctly.")
+        assertTrue(res4.equals([]), "For min > maxInclusive, no choices are possible.")
     }
 
     test("choice to decide one of two values") {
         def decide(): Unit / { choice, emit[String] } = {
-            if (do choice(1) == 0) {
+            if (do choice(0, 1) == 0) {
                 do emit("Hello")
                 do emit("World")
             } else {
@@ -281,6 +284,56 @@ def testAllChoices() = suite("allChoices handler") {
 
         val res = list::collect[String] { allChoices { decide() } }
         assertTrue(res.equals(["Hello", "World", "Byebye"]) { (x, y) => x == y }, "Both choices are made and all values are collected")
+    }
+}
+
+def testRandomChoice() = suite("randomChoice handler") {
+    test("No choice") {
+        def notActuallyChoosing(): Int / choice = {
+            if (false) { do choice(100, 123); () }
+            42
+        }
+
+        with minstd(0)
+        with assertNoThrow[OutOfBounds]
+        val res = randomChoice { notActuallyChoosing() }
+        assert(res, 42, "res should be 42 as choice is never called.")
+    }
+
+    test("Using the choice") {
+        def outputChoice(min: Int, maxInclusive: Int): Int / choice = {
+            do choice(min, maxInclusive)
+        }
+
+        with minstd(0)
+        with assertNoThrow[OutOfBounds]
+        val res1 = randomChoice { outputChoice(0, 0) }
+        val res2 = randomChoice { outputChoice(0, 10) }
+        assert(res1, 0, "Since min == maxInclusive, there is just one possible chosen value.")
+        assertTrue([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].contains(res2), "One of the 11 possible choices is made.")
+    }
+
+    test("Impossible choice with min > maxInclusive") {
+        assertThrows[OutOfBounds] {
+            with minstd(0)
+            randomChoice { do choice(5, 3) }
+            assertTrue(false, "Shouldn't reach this point, as a random choice with min > maxInclusive raises an exception.")
+        }
+    }
+
+    test("choice to decide one of two values") {
+        def decide(): String / choice = {
+            if (do choice(0, 1) == 0) {
+                "Hello World"
+            } else {
+                "Byebye"
+            }
+        }
+
+        with minstd(0)
+        with assertNoThrow[OutOfBounds]
+        val res = randomChoice { decide() }
+        assertTrue(["Hello World", "Byebye"].contains(res) { (x, y) => x == y }, "One valid random choice is made.")
     }
 }
 
@@ -503,6 +556,7 @@ def main(): Unit = {
         ("equals(List[A], List[A])", testListEqualsGeneric()),
         ("choice effect", testChoice()),
         ("allChoices handler", testAllChoices()),
+        ("randomChoice handler", testRandomChoice()),
         ("distinct[List[Int]]", testListDistinctInt()),
         ("equals(List[Int], List[Int])", testListEqualsInt()),
         ("contains(List[Int], Int)", testListContainsInt()),

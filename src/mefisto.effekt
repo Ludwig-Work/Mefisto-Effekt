@@ -156,13 +156,19 @@ def codeGuessResult(code: Code, guess: Code): GuessResult = {
     GuessResult(correctPos, incorrectPos)
 }
 
-// Produces a (uniformly) random code that is allowed according to the game `Config`.
-def randomCode(): Code / { random, Config } = {
+// Produces a code that is allowed according to the game `Config`.
+def generateCode(): Code / { choice, Config } = {
     var pins = Nil()
     each(0, do getCodeLength()) { i =>
-        pins = Cons(randomInt(0, do getNumColors() - 1), pins)
+        pins = Cons(do choice(0, do getNumColors() - 1), pins)
     }
     Code(pins)
+}
+
+// Produces a (uniformly random) code that is allowed according to the game `Config`.
+def randomCode(): Code / { random, Config } = {
+    with on[OutOfBounds].panic()
+    randomChoice { generateCode() }
 }
 
 // Confirms whether the given `code` is valid according to the `Config`, and raises `WrongFormat` if it isn't.
@@ -203,7 +209,14 @@ def mastermindGameMaster[A] { program: => A / GameMaster }: A / { random, Config
 // the respective GuessResults. Uses the choice effect to make decisions about the
 // code (and produces *all* possible codes in combination with the allChoices handler).
 def possibleCodes(guesses: List[(Code, GuessResult)]): Unit / { choice, emit[Code], Config } = {
-    <>
+    val code = generateCode()
+
+    val mismatch = guesses.any { case (guess, guessResult) =>
+        val actualResult = codeGuessResult(code, guess)
+        actualResult.correctPos != guessResult.correctPos || actualResult.incorrectPos != guessResult.incorrectPos
+    }
+
+    if (not(mismatch)) do emit(code)
 }
 
 // Helper and heart of the evil Mefisto game mode: From the given guess and prior guesses,
@@ -268,8 +281,7 @@ def play() = {
     with Formatted::formatting
     with defaultConfig
     with consolePlayer
-    with minstd(42)
-    with mastermindGameMaster
+    with mefistoGameMaster
     gameLoop()
 }
 
